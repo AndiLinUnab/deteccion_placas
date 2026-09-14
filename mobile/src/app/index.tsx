@@ -1,178 +1,232 @@
-import React, { useState, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Alert, Image, ScrollView } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import React, { useState } from 'react';
+import { 
+  StyleSheet, 
+  Text, 
+  View, 
+  TouchableOpacity, 
+  Image, 
+  ScrollView, 
+  ActivityIndicator,
+  Alert 
+} from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 
+// Dirección IP local de tu PC ejecutando FastAPI
 const API_URL = "http://192.168.1.46:8000/detect-plate";
 
-export default function App() {
-  const [permission, requestPermission] = useCameraPermissions();
-  const [loading, setLoading] = useState(false);
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
+export default function HomeScreen() {
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
   const [result, setResult] = useState<any>(null);
-  const cameraRef = useRef<any>(null);
 
-  if (!permission) return <View style={styles.container} />;
-
-  if (!permission.granted) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <Text style={styles.permissionText}>Se requieren permisos de cámara</Text>
-        <TouchableOpacity style={styles.primaryBtn} onPress={requestPermission}>
-          <Text style={styles.primaryBtnText}>Otorgar Acceso</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // PASO 1: Capturar foto y guardar en estado local
+  // 1. Capturar foto con la cámara del celular
   const takePhoto = async () => {
-    if (cameraRef.current) {
-      try {
-        const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
-        setPhotoUri(photo.uri);
-        setResult(null); // Limpiar predicciones anteriores
-      } catch (error: any) {
-        Alert.alert("Error", "No se pudo tomar la foto: " + error.message);
-      }
-    }
-  };
-
-  // PASO 2: Enviar la foto capturada al backend
-  const sendToBackend = async () => {
-    if (!photoUri) {
-      Alert.alert("Atención", "Primero debes tomar una foto presionando el botón central.");
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permiso requerido", "Se necesita acceso a la cámara");
       return;
     }
 
+    const res = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.5, // Comprime la imagen para reducir payload
+    });
+
+    if (!res.canceled) {
+      setImageUri(res.assets[0].uri);
+      setResult(null); // Limpiar resultado previo
+    }
+  };
+
+  // 2. Enviar imagen al Backend de FastAPI
+  const scanPlate = async () => {
+    if (!imageUri) {
+      Alert.alert("Atención", "Toma una foto antes de escanear");
+      return;
+    }
+
+    setLoading(true);
+    const formData = new FormData();
+    formData.append('file', {
+      uri: imageUri,
+      name: 'plate.jpg',
+      type: 'image/jpeg',
+    } as any);
+
     try {
-      setLoading(true);
-
-      const formData = new FormData();
-      const fileData = {
-        uri: photoUri.startsWith('file://') ? photoUri : `file://${photoUri}`,
-        name: 'scan_image.jpg',
-        type: 'image/jpeg',
-      };
-      formData.append('file', fileData as any);
-
       const response = await axios.post(API_URL, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 15000,
       });
-
       setResult(response.data);
-    } catch (error: any) {
-      console.error("Error al enviar:", error.message);
-      Alert.alert("Error de Conexión", "No se obtuvo respuesta del servidor backend.");
+    } catch (error) {
+      Alert.alert("Error de red", "No se pudo conectar con el servidor en la PC");
     } finally {
       setLoading(false);
     }
   };
 
-  const resetAll = () => {
-    setPhotoUri(null);
-    setResult(null);
-  };
-
   return (
-    <View style={styles.container}>
-      <View style={styles.topBar}>
-        <Text style={styles.statusLabel}>ALPR ENGINE ACTIVE</Text>
-        <Text style={styles.nodeText}>192.168.1.46:8000</Text>
-      </View>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Sistema ALPR - MLOps</Text>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Contenedor de Visor: Muestra la Cámara o la Foto Capturada */}
-        <View style={styles.viewportContainer}>
-          {photoUri ? (
-            <Image source={{ uri: photoUri }} style={styles.previewImage} />
-          ) : (
-            <CameraView style={styles.cameraAbsolute} ref={cameraRef} />
-          )}
+      {/* Vista previa de la foto */}
+      {imageUri && (
+        <Image source={{ uri: imageUri }} style={styles.previewImage} />
+      )}
 
-          <View style={styles.scanOverlay} pointerEvents="none">
-            <View style={styles.reticle}>
-              <View style={[styles.cornerBracket, styles.tl]} />
-              <View style={[styles.cornerBracket, styles.tr]} />
-              <View style={[styles.cornerBracket, styles.bl]} />
-              <View style={[styles.cornerBracket, styles.br]} />
-            </View>
-          </View>
-        </View>
-
-        {/* Resultado devuelto por el Backend */}
-        {result && (
-          <View style={styles.resultCard}>
-            <Text style={styles.sectionTitle}>PREDICCIÓN DEL BACKEND</Text>
-            <View style={styles.plateBadge}>
-              <Text style={styles.plateCode}>{result.placa_detectada}</Text>
-            </View>
-            <Text style={styles.messageText}>{result.mensaje}</Text>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* Barra de Controles */}
-      <View style={styles.footerBar}>
-        <TouchableOpacity style={styles.btnSecondary} onPress={resetAll}>
-          <Text style={styles.btnSecondaryText}>REINTENTAR</Text>
+      {/* Botones de acción */}
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity style={styles.btnCamera} onPress={takePhoto}>
+          <Text style={styles.btnText}>📷 Tomar Foto</Text>
         </TouchableOpacity>
 
-        {/* Botón Central: Solo Toma la Foto */}
-        <TouchableOpacity style={styles.triggerOuter} onPress={takePhoto}>
-          <View style={[styles.triggerInner, photoUri ? styles.triggerTaken : null]} />
-        </TouchableOpacity>
-
-        {/* Botón Escanear: Envía la Foto al Backend */}
         <TouchableOpacity 
-          style={[styles.btnPrimaryCyan, !photoUri && styles.btnDisabled]} 
-          onPress={sendToBackend}
-          disabled={loading || !photoUri}
+          style={[styles.btnScan, !imageUri && styles.btnDisabled]} 
+          onPress={scanPlate}
+          disabled={!imageUri || loading}
         >
-          {loading ? (
-            <ActivityIndicator size="small" color="#00F2FE" />
-          ) : (
-            <Text style={styles.btnPrimaryText}>ESCANEAR</Text>
-          )}
+          <Text style={styles.btnText}>🔍 Escanear Placa</Text>
         </TouchableOpacity>
       </View>
-    </View>
+
+      {/* Indicador de Carga */}
+      {loading && <ActivityIndicator size="large" color="#00F2FE" style={{ marginVertical: 20 }} />}
+
+      {/* TARJETA DE RESULTADOS DEL RUNT (AQUÍ VA EL CÓDIGO) */}
+      {result?.runt_data?.registrado && (
+        <View style={[
+          styles.runtCard, 
+          result.runt_data.alerta_robo ? styles.bgDanger : styles.bgSuccess
+        ]}>
+          <Text style={styles.runtTitle}>HISTORIAL RUNT TRÁNSITO</Text>
+          
+          <View style={styles.plateBadge}>
+            <Text style={styles.plateCode}>{result.placa_detectada}</Text>
+          </View>
+
+          <Text style={styles.runtText}>👤 Propietario: {result.runt_data.propietario}</Text>
+          <Text style={styles.runtText}>🚘 Vehículo: {result.runt_data.vehiculo}</Text>
+          <Text style={styles.runtText}>📄 SOAT: {result.runt_data.soat.estado} ({result.runt_data.soat.vencimiento})</Text>
+          <Text style={styles.runtText}>🔧 Tecnomecánica: {result.runt_data.tecnomecanica}</Text>
+          
+          {result.runt_data.alerta_robo && (
+            <Text style={styles.alertText}>⚠️ ¡ALERTA! VEHÍCULO CON REPORTE DE ROBO</Text>
+          )}
+        </View>
+      )}
+
+      {/* Si la placa no está en el RUNT */}
+      {result && !result.runt_data?.registrado && (
+        <View style={[styles.runtCard, styles.bgWarning]}>
+          <Text style={styles.runtTitle}>PLACA DETECTADA: {result.placa_detectada}</Text>
+          <Text style={styles.runtText}>Vehículo no encontrado en la base de datos RUNT.</Text>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
+// Estilos de la Interfaz Móvil
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B0F19', paddingTop: 45 },
-  center: { justifyContent: 'center', alignItems: 'center', padding: 24 },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 12 },
-  statusLabel: { color: '#00F2FE', fontSize: 11, fontWeight: '700' },
-  nodeText: { color: '#4A5568', fontSize: 11, fontFamily: 'monospace' },
-  content: { paddingHorizontal: 18, paddingBottom: 110 },
-  viewportContainer: { height: 250, borderRadius: 12, overflow: 'hidden', borderWidth: 1.5, borderColor: '#1E293B', marginBottom: 18, position: 'relative' },
-  cameraAbsolute: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  previewImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  scanOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
-  reticle: { width: 230, height: 100, position: 'relative' },
-  cornerBracket: { position: 'absolute', width: 22, height: 22, borderColor: '#00F2FE' },
-  tl: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
-  tr: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
-  bl: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3 },
-  br: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3 },
-  resultCard: { backgroundColor: '#111827', borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#1F2937', marginBottom: 16 },
-  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '700', marginBottom: 10 },
-  plateBadge: { backgroundColor: '#00F2FE', paddingHorizontal: 24, paddingVertical: 8, borderRadius: 6, marginBottom: 8 },
-  plateCode: { fontSize: 26, fontWeight: '900', color: '#0B0F19', fontFamily: 'monospace' },
-  messageText: { color: '#9CA3AF', fontSize: 12, textAlign: 'center' },
-  footerBar: { position: 'absolute', bottom: 24, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingHorizontal: 20 },
-  triggerOuter: { width: 68, height: 68, borderRadius: 34, borderWidth: 3, borderColor: '#00F2FE', justifyContent: 'center', alignItems: 'center' },
-  triggerInner: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#00F2FE' },
-  triggerTaken: { backgroundColor: '#10B981' },
-  btnSecondary: { backgroundColor: '#1F2937', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10 },
-  btnSecondaryText: { color: '#9CA3AF', fontSize: 11, fontWeight: '700' },
-  btnPrimaryCyan: { backgroundColor: '#161F30', borderWidth: 1, borderColor: '#00F2FE', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, minWidth: 90, alignItems: 'center' },
-  btnDisabled: { opacity: 0.4 },
-  btnPrimaryText: { color: '#00F2FE', fontSize: 11, fontWeight: '700' },
-  permissionText: { color: '#9CA3AF', textAlign: 'center', marginBottom: 16 },
-  primaryBtn: { backgroundColor: '#00F2FE', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8 },
-  primaryBtnText: { color: '#0B0F19', fontWeight: '800' }
+  container: {
+    padding: 20,
+    alignItems: 'center',
+    backgroundColor: '#121212',
+    minHeight: '100%',
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginTop: 40,
+    marginBottom: 20,
+  },
+  previewImage: {
+    width: '100%',
+    height: 250,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 20,
+  },
+  btnCamera: {
+    backgroundColor: '#333',
+    padding: 15,
+    borderRadius: 8,
+    flex: 0.48,
+    alignItems: 'center',
+  },
+  btnScan: {
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    flex: 0.48,
+    alignItems: 'center',
+  },
+  btnDisabled: {
+    backgroundColor: '#555',
+  },
+  btnText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+  },
+  runtCard: {
+    width: '100%',
+    padding: 20,
+    borderRadius: 12,
+    marginTop: 10,
+  },
+  bgSuccess: {
+    backgroundColor: '#1b4332',
+    borderColor: '#2d6a4f',
+    borderWidth: 1,
+  },
+  bgDanger: {
+    backgroundColor: '#600f0f',
+    borderColor: '#a4161a',
+    borderWidth: 1,
+  },
+  bgWarning: {
+    backgroundColor: '#4a3b00',
+    borderColor: '#856404',
+    borderWidth: 1,
+  },
+  runtTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  plateBadge: {
+    backgroundColor: '#FFD700',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    alignSelf: 'center',
+    marginBottom: 15,
+  },
+  plateCode: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 20,
+    letterSpacing: 2,
+  },
+  runtText: {
+    color: '#E0E0E0',
+    fontSize: 14,
+    marginBottom: 6,
+  },
+  alertText: {
+    color: '#FF4D4D',
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginTop: 10,
+    textAlign: 'center',
+  },
 });
