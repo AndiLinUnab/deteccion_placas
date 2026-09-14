@@ -4,7 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 
 // ⚠️ REEMPLAZA ESTA IP por la IP local IPv4 de tu PC (ej: 192.168.1.50)
-const API_URL = "http://192.168.1.50:8000/detect-plate";
+const API_URL = "http://192.168.1.46:8000/detect-plate";
 
 export default function HomeScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
