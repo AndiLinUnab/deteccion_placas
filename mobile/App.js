@@ -3,15 +3,15 @@ import { StyleSheet, Text, View, Button, Image, ActivityIndicator, Alert, Scroll
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 
-// ⚠️ REEMPLAZA ESTA IP por la IP local IPv4 de tu PC (ej: 192.168.1.50)
-const API_URL = "http://192.168.1.50:8000/detect-plate";
+// ⚠️ REEMPLAZA ESTA IP por la dirección IPv4 de tu PC en la red local
+const API_URL = "http://192.168.1.46:8000/detect-plate";
 
 export default function App() {
   const [imageUri, setImageUri] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  // Abrir la galería del celular
+  // Abrir la galería de imágenes del dispositivo
   const pickImage = async () => {
     let pickerResult = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -25,7 +25,7 @@ export default function App() {
     }
   };
 
-  // Enviar imagen en formato Multipart a FastAPI
+  // Enviar imagen mediante Multipart al backend de FastAPI
   const uploadImage = async () => {
     if (!imageUri) {
       Alert.alert("Error", "Selecciona una imagen de la galería primero.");
@@ -51,7 +51,7 @@ export default function App() {
     } catch (error) {
       Alert.alert(
         "Error de conexión",
-        "No se pudo conectar con el servidor. Verifica que tu PC y celular estén en la misma red Wi-Fi y que la IP sea la correcta."
+        "No se pudo conectar con el servidor FastAPI. Revisa que tu celular y PC estén en el mismo Wi-Fi y la IP sea correcta."
       );
     } finally {
       setLoading(false);
@@ -83,7 +83,7 @@ export default function App() {
 
       {result && (
         <View style={[styles.resultCard, result.placa_detectada !== "NO DETECTADA" ? styles.successCard : styles.errorCard]}>
-          <Text style={styles.resultTitle}>Resultado del Análisis:</Text>
+          <Text style={styles.resultTitle}>Resultado:</Text>
           <Text style={styles.resultText}>Placa: {result.placa_detectada}</Text>
           <Text style={styles.resultText}>Confianza: {result.confianza}</Text>
           <Text style={styles.statusText}>Estado: {result.estado}</Text>
@@ -102,6 +102,6 @@ const styles = StyleSheet.create({
   successCard: { backgroundColor: '#D4EDDA', borderColor: '#C3E6CB', borderWidth: 1 },
   errorCard: { backgroundColor: '#F8D7DA', borderColor: '#F5C6CB', borderWidth: 1 },
   resultTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
-  resultText: { fontSize: 16, color: '#155724', fontWeight: '500' },
+  resultText: { fontSize: 16, color: '#155724' },
   statusText: { fontSize: 14, color: '#6C757D', marginTop: 4 }
 });
