@@ -13,7 +13,7 @@ import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 
 // Dirección IP local del servidor FastAPI (Asegúrate de poner la IP de tu PC en la LAN)
-const API_URL = "http://192.168.1.46:8000/detect-plate";
+const API_URL = "http://192.168.1.25:8000/detect-plate";
 
 // Tipado TypeScript para la respuesta de la base de datos RUNT
 interface RuntData {
