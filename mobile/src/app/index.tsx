@@ -12,28 +12,28 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 
-// Dirección IP local del servidor FastAPI (Asegúrate de poner la IP de tu PC en la LAN)
-const API_URL = "http://192.168.1.25:8000/detect-plate";
+// Dirección IP pública de la EC2 en AWS
+const API_URL = "http://54.197.84.155:8000/detect-plate";
 
-// Tipado TypeScript para la respuesta de la base de datos RUNT
-interface RuntData {
-  registrado: boolean;
-  propietario?: string;
-  vehiculo?: string;
-  soat?: {
-    estado: string;
-    vencimiento: string;
-  };
-  tecnomecanica?: string;
-  alerta_robo?: boolean;
-  multas_pendientes?: number;
-  mensaje?: string;
+// Estructura adaptada al Backend Stateless (YOLOv8 + EasyOCR)
+interface BoundingBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+interface PlateDetection {
+  placa: string;
+  confianza_yolo: number;
+  confianza_ocr: number;
+  bounding_box: BoundingBox;
 }
 
 interface ApiResponse {
   status: string;
-  placa_detectada: string;
-  runt_data: RuntData | null;
+  total_placas_encontradas: number;
+  resultados: PlateDetection[];
 }
 
 export default function HomeScreen() {
@@ -41,7 +41,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState<boolean>(false);
   const [result, setResult] = useState<ApiResponse | null>(null);
 
-  // 1. Captura de foto usando la Cámara nativa
+  // 1. Captura de foto usando la cámara nativa
   const takePhoto = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
@@ -56,7 +56,7 @@ export default function HomeScreen() {
 
     if (!res.canceled && res.assets[0].uri) {
       setImageUri(res.assets[0].uri);
-      setResult(null); // Resetear estado anterior
+      setResult(null); // Resetear estados anteriores
     }
   };
 
@@ -76,18 +76,17 @@ export default function HomeScreen() {
 
     if (!res.canceled && res.assets[0].uri) {
       setImageUri(res.assets[0].uri);
-      setResult(null); // Resetear estado anterior
+      setResult(null); // Resetear estados anteriores
     }
   };
 
-  // 3. Envío del archivo al Backend FastAPI (Soporta Re-escaneo)
+  // 3. Envío multipart/form-data al backend FastAPI
   const scanPlate = async () => {
     if (!imageUri) return;
 
     setLoading(true);
     const formData = new FormData();
 
-    // Inserción del blob de la imagen en Multipart Form Data
     formData.append('file', {
       uri: imageUri,
       name: 'plate_upload.jpg',
@@ -99,13 +98,14 @@ export default function HomeScreen() {
         headers: { 
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 10000, // Timeout de 10 segundos
+        timeout: 20000,
       });
+
       setResult(response.data);
     } catch (error) {
       Alert.alert(
         "Error de Comunicación", 
-        "No se pudo conectar con el servidor de inferencia FastAPI. Revisa que el backend esté corriendo y en la misma red WiFi."
+        "No se pudo conectar con el servidor de inferencia. Revisa que el servicio esté corriendo en la IP especificada."
       );
     } finally {
       setLoading(false);
@@ -115,9 +115,9 @@ export default function HomeScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.headerTitle}>ALPR System - UNAB MLOps</Text>
-      <Text style={styles.subtitle}>Detección de Placas & Consulta RUNT</Text>
+      <Text style={styles.subtitle}>Escaneo Directo de Placas en Tiempo Real</Text>
 
-      {/* Visor de Previsualización */}
+      {/* Visor de Previsualización de Imagen */}
       {imageUri ? (
         <Image source={{ uri: imageUri }} style={styles.previewImage} />
       ) : (
@@ -126,7 +126,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* Botones de Selección de Origen */}
+      {/* Botones de Selección */}
       <View style={styles.rowButtons}>
         <TouchableOpacity style={styles.btnSecondary} onPress={takePhoto}>
           <Text style={styles.btnTextSecondary}>📷 Cámara</Text>
@@ -137,75 +137,62 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Botón de Inferencia / Re-inferencia */}
+      {/* Botón de Inferencia */}
       <TouchableOpacity 
         style={[styles.btnPrimary, !imageUri && styles.btnDisabled]} 
         onPress={scanPlate}
         disabled={!imageUri || loading}
       >
         <Text style={styles.btnTextPrimary}>
-          {result ? "🔄 Volver a Escanear Placa" : "🔍 Escanear Placa"}
+          {result ? "🔄 Escanear Otra Imagen" : "🔍 Escanear Placa"}
         </Text>
       </TouchableOpacity>
 
       {loading && (
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#00F2FE" />
-          <Text style={styles.loadingText}>Procesando modelo YOLOv8 + OCR...</Text>
+          <Text style={styles.loadingText}>Procesando con YOLOv8 + EasyOCR...</Text>
         </View>
       )}
 
-      {/* Tarjeta 1: Vehículo Registrado en el RUNT */}
-      {result?.runt_data?.registrado && (
-        <View style={[
-          styles.runtCard, 
-          result.runt_data.alerta_robo ? styles.bgDanger : styles.bgSuccess
-        ]}>
-          <Text style={styles.runtCardHeader}>HISTORIAL RUNT TRÁNSITO</Text>
-          
-          <View style={styles.plateBadge}>
-            <Text style={styles.plateCode}>{result.placa_detectada}</Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.label}>Propietario:</Text>
-            <Text style={styles.value}>{result.runt_data.propietario}</Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.label}>Vehículo:</Text>
-            <Text style={styles.value}>{result.runt_data.vehiculo}</Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.label}>Estado SOAT:</Text>
-            <Text style={styles.value}>
-              {result.runt_data.soat?.estado} ({result.runt_data.soat?.vencimiento})
-            </Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.label}>Tecnomecánica:</Text>
-            <Text style={styles.value}>{result.runt_data.tecnomecanica}</Text>
-          </View>
-
-          {result.runt_data.alerta_robo && (
-            <View style={styles.alertBanner}>
-              <Text style={styles.alertText}>⚠️ ¡ALERTA! VEHÍCULO CON REPORTE DE ROBO ACTIVO</Text>
-            </View>
-          )}
-        </View>
-      )}
-
-      {/* Tarjeta 2: Placa Detectada pero NO Registrada */}
-      {result && !result.runt_data?.registrado && (
-        <View style={[styles.runtCard, styles.bgWarning]}>
-          <Text style={styles.runtCardHeader}>PLACA DETECTADA: {result.placa_detectada}</Text>
-          <Text style={styles.warningText}>
-            La placa fue extraída correctamente por el OCR, pero no se encontró un expediente asociado en la base de datos RUNT.
+      {/* Resumen del Resutado */}
+      {result && (
+        <View style={styles.summaryBadge}>
+          <Text style={styles.summaryText}>
+            Placas encontradas: {result.total_placas_encontradas}
           </Text>
         </View>
       )}
+
+      {/* Listado dinámico de Detecciones */}
+      {result?.resultados.map((item, index) => (
+        <View key={index} style={{ width: '100%' }}>
+          <View style={styles.runtCard}>
+            <Text style={styles.runtCardHeader}>DETECCIÓN #{index + 1}</Text>
+            
+            <View style={styles.plateBadge}>
+              <Text style={styles.plateCode}>{item.placa}</Text>
+            </View>
+
+            <View style={styles.infoRow}>
+              <Text style={styles.label}>Precisión YOLOv8:</Text>
+              <Text style={styles.value}>{(item.confianza_yolo * 100).toFixed(0)}%</Text>
+            </View>
+
+            <View style={styles.infoRow}>
+              <Text style={styles.label}>Precisión OCR:</Text>
+              <Text style={styles.value}>{(item.confianza_ocr * 100).toFixed(0)}%</Text>
+            </View>
+
+            <View style={styles.infoRow}>
+              <Text style={styles.label}>Coordenadas Bounding Box:</Text>
+              <Text style={styles.value}>
+                [{item.bounding_box.x1}, {item.bounding_box.y1}, {item.bounding_box.x2}, {item.bounding_box.y2}]
+              </Text>
+            </View>
+          </View>
+        </View>
+      ))}
     </ScrollView>
   );
 }
@@ -293,29 +280,33 @@ const styles = StyleSheet.create({
     marginTop: 8, 
     fontSize: 13 
   },
+  summaryBadge: {
+    backgroundColor: '#1C1C1E',
+    borderColor: '#00F2FE',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginTop: 15,
+    width: '100%',
+    alignItems: 'center'
+  },
+  summaryText: {
+    color: '#00F2FE',
+    fontWeight: 'bold',
+    fontSize: 14
+  },
   runtCard: { 
     width: '100%', 
     padding: 20, 
     borderRadius: 14, 
-    marginTop: 20 
-  },
-  bgSuccess: { 
-    backgroundColor: '#143623', 
-    borderColor: '#2D6A4F', 
-    borderWidth: 1 
-  },
-  bgDanger: { 
-    backgroundColor: '#4A1212', 
-    borderColor: '#A4161A', 
-    borderWidth: 1 
-  },
-  bgWarning: { 
-    backgroundColor: '#3D3200', 
-    borderColor: '#856404', 
-    borderWidth: 1 
+    marginTop: 15,
+    backgroundColor: '#1C1C1E',
+    borderColor: '#00F2FE',
+    borderWidth: 1
   },
   runtCardHeader: { 
-    fontSize: 15, 
+    fontSize: 14, 
     fontWeight: 'bold', 
     color: '#FFF', 
     marginBottom: 12, 
@@ -353,23 +344,5 @@ const styles = StyleSheet.create({
     color: '#FFF', 
     fontSize: 13, 
     fontWeight: 'bold' 
-  },
-  alertBanner: { 
-    backgroundColor: '#FF3B30', 
-    padding: 10, 
-    borderRadius: 8, 
-    marginTop: 12 
-  },
-  alertText: { 
-    color: '#FFF', 
-    fontWeight: 'bold', 
-    fontSize: 13, 
-    textAlign: 'center' 
-  },
-  warningText: { 
-    color: '#E0E0E0', 
-    fontSize: 13, 
-    textAlign: 'center', 
-    marginTop: 5 
   }
 });

@@ -58,37 +58,50 @@ async def detect_plate(file: UploadFile = File(...)):
         pil_img = ImageOps.exif_transpose(pil_img)
         img_bgr = cv2.cvtColor(np.array(pil_img.convert('RGB')), cv2.COLOR_RGB2BGR)
 
-        # 2. Detección de Bounding Box de la placa con YOLOv8
+        # 2. Detección de Bounding Boxes de todas las placas con YOLOv8
         results = yolo_model(img_bgr, conf=0.35)
-        crop_target = img_bgr
         
+        detecciones = []
+
+        # Iterar sobre las detecciones multiobjeto
         for r in results:
             for box in r.boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
+                confidence = float(box.conf[0])
+                
+                # Recorte individual de cada placa encontrada
                 crop_target = img_bgr[y1:y2, x1:x2]
-                break
+                if crop_target.size == 0:
+                    continue
 
-        # 3. Preprocesamiento OCR y extracción
-        gray = cv2.cvtColor(crop_target, cv2.COLOR_BGR2GRAY)
-        gray = cv2.bilateralFilter(gray, 11, 17, 17)
-        ocr_results = ocr_reader.readtext(gray)
+                # 3. Preprocesamiento OCR y extracción por cada recorte
+                gray = cv2.cvtColor(crop_target, cv2.COLOR_BGR2GRAY)
+                gray = cv2.bilateralFilter(gray, 11, 17, 17)
+                ocr_results = ocr_reader.readtext(gray)
 
-        placa_detectada = "NO DETECTADA"
-        for (_, text, prob) in ocr_results:
-            clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
-            if len(clean_text) >= 5 and prob > 0.20:
-                placa_detectada = clean_text
-                break
+                placa_detectada = "NO DETECTADA"
+                for (_, text, prob) in ocr_results:
+                    clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
+                    if len(clean_text) >= 5 and prob > 0.20:
+                        placa_detectada = clean_text
+                        break
 
-        # 4. Módulo Diferencial: Consulta RUNT
-        info_runt = None
-        if placa_detectada != "NO DETECTADA":
-            info_runt = query_runt_database(placa_detectada)
+                # 4. Consulta RUNT individualizada
+                info_runt = None
+                if placa_detectada != "NO DETECTADA":
+                    info_runt = query_runt_database(placa_detectada)
+
+                detecciones.append({
+                    "placa_detectada": placa_detectada,
+                    "confianza_deteccion": round(confidence, 2),
+                    "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                    "runt_data": info_runt
+                })
 
         return {
             "status": "success",
-            "placa_detectada": placa_detectada,
-            "runt_data": info_runt
+            "total_placas_detectadas": len(detecciones),
+            "resultados": detecciones
         }
 
     except Exception as e:
